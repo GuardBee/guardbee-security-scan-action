@@ -1,0 +1,124 @@
+name: 'GuardBee Security Scan'
+description: 'Run GuardBee security scans — secret detection, dependency CVEs, SSL inspection, and DNS checks'
+author: 'GuardBee <hello@guardbee.ai>'
+
+branding:
+  icon: 'shield'
+  color: 'green'
+
+inputs:
+  secret-scan:
+    description: 'Run secret scanner'
+    required: false
+    default: 'true'
+
+  dep-audit:
+    description: 'Run dependency CVE audit'
+    required: false
+    default: 'true'
+
+  ssl-inspect:
+    description: 'Run SSL/TLS inspection (requires domain input)'
+    required: false
+    default: 'false'
+
+  dns-check:
+    description: 'Run DNS intelligence check (requires domain input)'
+    required: false
+    default: 'false'
+
+  domain:
+    description: 'Domain to inspect (for ssl-inspect and dns-check)'
+    required: false
+    default: ''
+
+  fail-on:
+    description: 'Severity threshold for failure: critical | high | medium | low'
+    required: false
+    default: 'high'
+
+  upload-sarif:
+    description: 'Upload SARIF results to GitHub Security tab'
+    required: false
+    default: 'true'
+
+  working-directory:
+    description: 'Directory to scan (default: repo root)'
+    required: false
+    default: '.'
+
+outputs:
+  secret-scan-exit-code:
+    description: 'Exit code of the secret scan (0=clean, 1=findings, 2=error)'
+    value: ${{ steps.secret-scan.outputs.exit-code }}
+
+  dep-audit-exit-code:
+    description: 'Exit code of the dependency audit (0=clean, 1=findings, 2=error)'
+    value: ${{ steps.dep-audit.outputs.exit-code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Secret scan
+      id: secret-scan
+      if: inputs.secret-scan == 'true'
+      shell: bash
+      run: |
+        set +e
+        npx --yes @guardbee/security-suite@latest secret-scan "${{ inputs.working-directory }}" \
+          --fail-on="${{ inputs.fail-on }}" \
+          --format=sarif > guardbee-secrets.sarif 2>&1
+        CODE=$?
+        # Also run text output for logs
+        npx --yes @guardbee/security-suite@latest secret-scan "${{ inputs.working-directory }}" \
+          --fail-on="${{ inputs.fail-on }}"
+        echo "exit-code=$CODE" >> "$GITHUB_OUTPUT"
+        exit $CODE
+
+    - name: Dependency audit
+      id: dep-audit
+      if: inputs.dep-audit == 'true'
+      shell: bash
+      run: |
+        set +e
+        npx --yes @guardbee/security-suite@latest dep-audit "${{ inputs.working-directory }}" \
+          --fail-on="${{ inputs.fail-on }}" \
+          --format=sarif > guardbee-deps.sarif 2>&1
+        CODE=$?
+        npx --yes @guardbee/security-suite@latest dep-audit "${{ inputs.working-directory }}" \
+          --fail-on="${{ inputs.fail-on }}"
+        echo "exit-code=$CODE" >> "$GITHUB_OUTPUT"
+        exit $CODE
+
+    - name: SSL inspect
+      if: inputs.ssl-inspect == 'true' && inputs.domain != ''
+      shell: bash
+      run: |
+        npx --yes @guardbee/security-suite@latest ssl-inspect "${{ inputs.domain }}" \
+          --fail-on="${{ inputs.fail-on }}"
+
+    - name: DNS check
+      if: inputs.dns-check == 'true' && inputs.domain != ''
+      shell: bash
+      run: |
+        npx --yes @guardbee/security-suite@latest dns-check "${{ inputs.domain }}" \
+          --fail-on="${{ inputs.fail-on }}"
+
+    - name: Upload secret scan SARIF
+      if: inputs.upload-sarif == 'true' && inputs.secret-scan == 'true' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: guardbee-secrets.sarif
+        category: guardbee-secret-scanner
+
+    - name: Upload dependency audit SARIF
+      if: inputs.upload-sarif == 'true' && inputs.dep-audit == 'true' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: guardbee-deps.sarif
+        category: guardbee-dependency-auditor
