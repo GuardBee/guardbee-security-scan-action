@@ -70,13 +70,16 @@ runs:
       shell: bash
       run: |
         set +e
-        npx --yes @guardbee/security-suite@latest secret-scan "${{ inputs.working-directory }}" \
-          --fail-on="${{ inputs.fail-on }}" \
-          --format=sarif > guardbee-secrets.sarif 2>&1
-        CODE=$?
-        # Also run text output for logs
-        npx --yes @guardbee/security-suite@latest secret-scan "${{ inputs.working-directory }}" \
-          --fail-on="${{ inputs.fail-on }}"
+        if [[ "${{ inputs.upload-sarif }}" == "true" ]]; then
+          npx --yes @guardbee/security-suite@latest secret-scan "${{ inputs.working-directory }}" \
+            --fail-on="${{ inputs.fail-on }}" \
+            --format=sarif | tee guardbee-secrets.sarif
+          CODE=${PIPESTATUS[0]}
+        else
+          npx --yes @guardbee/security-suite@latest secret-scan "${{ inputs.working-directory }}" \
+            --fail-on="${{ inputs.fail-on }}"
+          CODE=$?
+        fi
         echo "exit-code=$CODE" >> "$GITHUB_OUTPUT"
         exit $CODE
 
@@ -86,12 +89,16 @@ runs:
       shell: bash
       run: |
         set +e
-        npx --yes @guardbee/security-suite@latest dep-audit "${{ inputs.working-directory }}" \
-          --fail-on="${{ inputs.fail-on }}" \
-          --format=sarif > guardbee-deps.sarif 2>&1
-        CODE=$?
-        npx --yes @guardbee/security-suite@latest dep-audit "${{ inputs.working-directory }}" \
-          --fail-on="${{ inputs.fail-on }}"
+        if [[ "${{ inputs.upload-sarif }}" == "true" ]]; then
+          npx --yes @guardbee/security-suite@latest dep-audit "${{ inputs.working-directory }}" \
+            --fail-on="${{ inputs.fail-on }}" \
+            --format=sarif | tee guardbee-deps.sarif
+          CODE=${PIPESTATUS[0]}
+        else
+          npx --yes @guardbee/security-suite@latest dep-audit "${{ inputs.working-directory }}" \
+            --fail-on="${{ inputs.fail-on }}"
+          CODE=$?
+        fi
         echo "exit-code=$CODE" >> "$GITHUB_OUTPUT"
         exit $CODE
 
